@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <title>Van der Waals</title>
+  <style>
+    body   { font-family: sans-serif; max-width: 640px; margin: 2rem auto; }
+    label  { display: block; margin: .5rem 0; }
+    input, select { width: 12rem; }
+    table  { border-collapse: collapse; margin-top: 1rem; }
+    td, th { border: 1px solid #ccc; padding: .25rem .6rem; text-align: right; }
+  </style>
+</head>
+<body>
+  <h1>Volume de van der Waals</h1>
+
+  <form id="form">
+    <label>Gás:
+      <select id="gas">
+        <option value="N2">N₂</option>
+        <option value="C4H10">Butano (C₄H₁₀)</option>
+      </select>
+    </label>
+    <label>Pressão (atm):       <input type="number" id="pressao"      value="2"   step="0.1"></label>
+    <label>Massa (g):           <input type="number" id="grama"        value="100" step="1"></label>
+    <label>Temperatura (°C):    <input type="number" id="temp_celsius" value="100" step="1"></label>
+    <button type="submit">Calcular</button>
+  </form>
+
+  <div id="resultado"></div>
+
+  <!-- ============================================================ -->
+  <!-- Python embutido: nada de fetch, nada de CORS                  -->
+  <!-- ============================================================ -->
+  <script id="py-src" type="text/python">
+import json
+
+CONSTANTES = {
+    "N2":    [1.37,  0.0387, 28.014],
+    "C4H10": [14.66, 0.1226, 58.124],
+}
+
+def calcular_volume(params_json: str) -> str:
+    p = json.loads(params_json)
+
+    pressao      = float(p["pressao"])
+    grama        = float(p["grama"])
+    temp_celsius = float(p["temp_celsius"])
+    gas          = p["gas"]
+    precisao     = float(p.get("precisao", 1e-6))
+
+    a, b, massa_molar = CONSTANTES[gas]
+    mols        = grama / massa_molar
+    temp_kelvin = temp_celsius + 273.15
+    R           = 0.082057
+
+    def f(V):
+        return (pressao + (a * mols**2) / V**2) * (V - mols * b) - mols * R * temp_kelvin
+
+    def dV(V, h=1e-5):
+        return (f(V + h) - f(V - h)) / (2 * h)
+
+    gas_ideal = mols * R * temp_kelvin / pressao
+    if f(gas_ideal) < 0:
+        intervalo_menor, intervalo_maior = gas_ideal, gas_ideal + 1
+        while f(intervalo_maior) < 0:
+            intervalo_maior += 1
+    else:
+        intervalo_menor, intervalo_maior = gas_ideal - 1, gas_ideal
+        while f(intervalo_menor) > 0:
+            intervalo_menor -= 1
+
+    h2      = 1e-3
+    d2f_val = (dV(intervalo_menor + h2) - dV(intervalo_menor - h2)) / (2 * h2)
+    V0 = intervalo_menor if dV(intervalo_menor) * d2f_val < 0 else intervalo_maior
+
+    iteracoes = []
+    i, fV = 0, f(V0)
+    iteracoes.append({"i": i, "V": V0, "fV": fV})
+    while abs(fV) > precisao and i < 30:
+        i += 1
+        V0 -= fV / dV(V0)
+        fV  = f(V0)
+        iteracoes.append({"i": i, "V": V0, "fV": fV})
+
+    return json.dumps({
+        "volume":       V0,
+        "volume_ideal": gas_ideal,
+        "mols":         mols,
+        "convergiu":    abs(fV) <= precisao,
+        "iteracoes":    iteracoes,
+    })
+  </script>
+
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.27.0/full/pyodide.js"></script>
+  <script>
+    let calcularVolume = null;
+
+    async function iniciar() {
+      const pyodide = await loadPyodide();
+
+      // pega o código Python direto do <script> acima
+      const codigo = document.getElementById("py-src").textContent;
+      await pyodide.runPythonAsync(codigo);
+
+      calcularVolume = pyodide.globals.get("calcular_volume");
+
+      document.getElementById("form")
+              .addEventListener("submit", aoSubmeter);
+      document.getElementById("form").requestSubmit();
+    }
+
+    function aoSubmeter(evento) {
+      evento.preventDefault();
+
+      const params = {
+        gas:          document.getElementById("gas").value,
+        pressao:      parseFloat(document.getElementById("pressao").value),
+        grama:        parseFloat(document.getElementById("grama").value),
+        temp_celsius: parseFloat(document.getElementById("temp_celsius").value),
+      };
+
+      const dados = JSON.parse(calcularVolume(JSON.stringify(params)));
+      render(dados);
+    }
+
+    function render(d) {
+      const linhas = d.iteracoes
+        .map(it => `<tr><td>${it.i}</td><td>${it.V.toFixed(6)}</td>
+                        <td>${it.fV.toExponential(3)}</td></tr>`)
+        .join("");
+
+      document.getElementById("resultado").innerHTML = `
+        <p><strong>V = ${d.volume.toFixed(6)} L</strong>
+           ${d.convergiu ? "✔" : "✖ (não convergiu)"}</p>
+        <p>Gás ideal: ${d.volume_ideal.toFixed(6)} L</p>
+        <table>
+          <thead><tr><th>i</th><th>V (L)</th><th>f(V)</th></tr></thead>
+          <tbody>${linhas}</tbody>
+        </table>`;
+    }
+
+    iniciar();
+  </script>
+</body>
+</html>
