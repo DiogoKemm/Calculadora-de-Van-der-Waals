@@ -77,24 +77,41 @@
 <script id="py-src" type="text/python">
 import json
 
+
 CONSTANTES = {
-    "N2":    [1.37,  0.0387, 28.014],
-    "C4H10": [14.66, 0.1226, 58.124],
+    "Água (H2O)": [5.463606, 0.03049, 18.015],
+    "Amônia (NH3)": [4.169750, 0.0371, 17.031],
+    "Argônio (Ar)": [1.337281, 0.03201, 39.948],
+    "Dióxido de carbono (CO2)": [3.552923, 0.04267, 44.010],
+    "Hélio (He)": [0.034148, 0.0238, 4.003],
+    "Hidrogênio (H2)": [0.244362, 0.02661, 2.016],
+    "Metano (CH4)": [2.253145, 0.04278, 16.043],
+    "Nitrogênio (N2)": [1.352085, 0.0387, 28.014],
+    "Oxigênio (O2)": [1.363928, 0.03186, 31.998],
+    "Propano (C3H8)": [8.664197, 0.08445, 44.097],
 }
-PADRAO = set(CONSTANTES.keys())
+
 
 def calcular_volume(pressao, temp_celsius, a, b, mols, precisao=1e-6):
+    
+    #converte temperatura para Kelvin
     temp_kelvin = temp_celsius + 273.15
+    # cria a variável que armazena a constante universal dos gases
     R = 0.082057
 
+    #equação de van der Waals
     def f(V):
         return (pressao + a * mols**2 / V**2) * (V - mols * b) - mols * R * temp_kelvin
 
+    #cálculo da derivada
     def dV(V, h=1e-5):
         return (f(V + h) - f(V - h)) / (2 * h)
 
+    #calcula o volume com a fórmula dos gases ideais, para utilizar o resultado na busca do limite superior e inferior no método de newton
     gas_ideal = mols * R * temp_kelvin / pressao
 
+    #define o intervalo de busca - lo é limite inferior e hi é limite superior (se o valor do gas ideal for menor que 0, ele é limite inferior 
+    #e então se adiciona +1 em várias iterações até o valor ficar positivo, então esse será o limite superior. O contrário é feito se o valor inicial for positivo)
     if f(gas_ideal) < 0:
         lo, hi = gas_ideal, gas_ideal + 1
         while f(hi) < 0: hi += 1
@@ -102,12 +119,16 @@ def calcular_volume(pressao, temp_celsius, a, b, mols, precisao=1e-6):
         lo, hi = gas_ideal - 1, gas_ideal
         while f(lo) > 0: lo -= 1
 
+    #estimativa do valor inicial (o "chute")
     h2  = 1e-3
     d2f = (dV(lo + h2) - dV(lo - h2)) / (2 * h2)
     V0  = lo if dV(lo) * d2f < 0 else hi
 
+    #armazena as interações realizadas
     iters = [{"i": 0, "V": V0, "fV": f(V0)}]
     i, fV = 0, f(V0)
+
+    #método de Newton
     while abs(fV) > precisao and i < 30:
         i += 1
         V0 -= fV / dV(V0)
